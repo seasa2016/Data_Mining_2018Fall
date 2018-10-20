@@ -6,7 +6,7 @@
 #include<utility>
 #include<algorithm>
 #include<set>
-#define bit_size 32
+#define bit_size 256
 
 using namespace std;
 class APRIORI{

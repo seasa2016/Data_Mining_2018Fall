@@ -5,7 +5,9 @@
 #include<bitset>
 #include<utility>
 #include<algorithm>
-#define bit_size 512
+#include <time.h>
+
+#define bit_size 16384
 using namespace std;
 
 
@@ -91,6 +93,9 @@ class ECLAT{
 
 int main(int argc,char * argv[])
 {
+    time_t start, end;
+
+    start = clock();
     int id,i;
     char str[2048];
     char* fir;
@@ -136,5 +141,9 @@ int main(int argc,char * argv[])
     head.second.set();
     //cout << head.second;
     eclat.freq(head);
-   
-}
+    end = clock();
+
+    double diff = ((double) (end - start)) / CLOCKS_PER_SEC;
+
+    printf("Time = %f\n", diff);
+}   
