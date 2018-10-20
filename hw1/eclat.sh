@@ -1,2 +1,1 @@
-g++ -o eclat eclat.cpp
-./eclat $1 $2 $3
+python eclat.py $1 $2 $3

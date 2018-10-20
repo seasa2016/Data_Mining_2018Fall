@@ -39,7 +39,7 @@ class APRIORI:
         return True
 
 
-    def create_Ck(self,Lksub1, k):
+    def create_c(self,Lksub1, k):
         Ck = set()
         len_Lksub1 = len(Lksub1)
         list_Lksub1 = list(Lksub1)
@@ -58,7 +58,7 @@ class APRIORI:
         return Ck
 
 
-    def generate_Lk_by_Ck(self,Ck):
+    def generate_l_by_c(self,Ck):
         Lk = set()
         item_count = {}
         for t in self.data_set:
@@ -78,15 +78,14 @@ class APRIORI:
 
     def freq(self):
         self.support_data = {}
-        self.create_C1()
-        L1 = self.generate_Lk_by_Ck(self.C1)
+        L1 = self.generate_l_by_c(self.C1)
 
         Lksub1 = L1.copy()
                 
         i = 2
         while(True):
-            Ci = self.create_Ck(Lksub1, i)
-            Li = self.generate_Lk_by_Ck(Ci)
+            Ci = self.create_c(Lksub1, i)
+            Li = self.generate_l_by_c(Ci)
             if(len(Li) == 0):
                 break
             Lksub1 = Li.copy()            
