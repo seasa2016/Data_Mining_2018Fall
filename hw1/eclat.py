@@ -18,13 +18,13 @@ class ECLAT:
                     self.data_set[num].add(i)
                     self.total.add(i)
 
-        for i in self.data_set:
-            print(i)
+        #for i in self.data_set:
+        #    print(i)
         self.min_sup = min_sup * len(self.data_set)
         
 
     def freq(self,value=set(),now=set(),start=0):
-        print('-',value,now,start)
+        #print('-',value,now,start)
         for i in range(start,len(self.data_set)):
             temp_v = value.copy()
             temp_v = temp_v & self.data_set[i]
