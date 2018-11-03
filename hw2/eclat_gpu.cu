@@ -12,8 +12,30 @@
 #include <time.h>
 
 #define N 1048576
-#define block_size 2
-#define thread_size 2
+#define block_size 16
+#define thread_size 16
+
+#define cudaCheckErrors(msg) \
+    do { \
+        cudaError_t __err = cudaGetLastError(); \
+        if (__err != cudaSuccess) { \
+            fprintf(stderr, "Fatal error: %s (%s at %s:%d)\n", \
+                msg, cudaGetErrorString(__err), \
+                __FILE__, __LINE__); \
+            fprintf(stderr, "*** FAILED - ABORTING\n"); \
+            exit(1); \
+        } \
+    } while (0)
+#define gpuErrchk(ans) { gpuAssert((ans), __FILE__, __LINE__); }
+inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=true)
+{
+   if (code != cudaSuccess) 
+   {
+      fprintf(stderr,"GPUassert: %s %s %d\n", cudaGetErrorString(code), file, line);
+      if (abort) exit(code);
+   }
+}
+
 
 using namespace std;
 
@@ -41,7 +63,7 @@ __device__ int my_push_back(stat *result,unsigned int *data,int size,int count,i
     {
         result[ N/block_size*bid + insert_idx ].count[0] = count;
 
-        memcpy(result[  N/block_size*bid + insert_idx ].val,data,size*sizeof(int));
+        memcpy(result[  N/block_size*bid + insert_idx ].val,data,size*sizeof(unsigned int));
         
         return insert_idx;
     }
@@ -69,9 +91,9 @@ __device__ void find(Pre *head,Data *data,int i,stat *result,int &max,int &size,
     int c;
 
 
-    unsigned int *ori = (unsigned int*)malloc(max*sizeof(int));
+    unsigned int *ori = (unsigned int*)malloc(max*sizeof(unsigned int));
     
-    memcpy(ori,head->bit,max*sizeof(int));
+    memcpy(ori,head->bit,max*sizeof(unsigned int));
         
     //printf("data_size %d\n",data_size);
     for(;i<data_size;i++)
@@ -82,7 +104,6 @@ __device__ void find(Pre *head,Data *data,int i,stat *result,int &max,int &size,
         for(j=0;j<max;j++)
             c += bit_count( head->bit[j] & data[i].bit[j]);
 
-    const int bid = blockIdx.x;
         printf("(%d,%d) i:%d count:%d min_sup:%d\n",tid,bid,i,c,min_sup);
         if( c > min_sup)
         {
@@ -98,7 +119,7 @@ __device__ void find(Pre *head,Data *data,int i,stat *result,int &max,int &size,
             if(1+i<data_size)
                 find(head,data,i+1,result,max,size,data_size,min_sup);
 
-            memcpy(head->bit,ori,max*sizeof(int));
+            memcpy(head->bit,ori,max*sizeof(unsigned int));
 
             head->val[data[i].now/32] &= ~(1U << (data[i].now%32));
         }
@@ -118,44 +139,42 @@ __global__ void gpu_find(Data *data,stat *result,int max,int size,int data_size,
     __syncthreads();
     
     //printf("start:%d %d\n",bid,tid);
-    int i;
+    int i,j;
     /*
-    unsigned int temp;
-    for(i=0;i<data_size;i++)
+    if(tid==0 && bid==1)
     {
-        printf("%d-",data[i].now);
-        for(j=0;j<max;j++)
+        for(i=0;i<data_size;i++)
         {
-            temp = data[i].bit[j];
-            while(temp)
+            printf("%d-",data[i].now);
+            for(j=0;j<max;j++)
             {
-                printf("%d",temp%2);
-                temp /= 2;
+                printf("%u ",data[i].bit[j]);
             }
+            printf("\n");
         }
-        printf("\n");
     }
     */
     
-    Pre *head=(Pre*)malloc(sizeof(Pre));
-    head->val = (unsigned int*)malloc(size*sizeof(int));
-    head->bit = (unsigned int*)malloc(max*sizeof(int));
-    memset(head->val,0,size*sizeof(int));
+    Pre head;
+    head.val = new unsigned int[size];
+    head.bit = new unsigned int[max];
+    memset(head.val,0,size*sizeof(unsigned int));
     
+    //printf("size %d max %d data_size %d\n",size,max,data_size);
     for(i=tid*blockDim.x+bid ; i<data_size ; i+= blockDim.x * gridDim.x)
     {
-        printf("---%d %d %d----------------------\n",bid,tid,i);
-        head->val[data[i].now/32] |= (1U << (data[i].now%32));
+        head.val[data[i].now/32] |= (1U << (data[i].now%32));
 
-        memcpy(head->bit,data[i].bit,max*sizeof(int));
-
-
-        //find(Pre *head,Data *data,int i,stat *result,int max,int size,int data_size,unsigned int min_sup)
-        find(head,data,i+1,result,max,size,data_size,min_sup);
+        for(j=0;j<max;j++)    
+            head.bit[j] = data[i].bit[j];
         
-        head->val[data[i].now/32] &= ~(1U << (data[i].now%32));
+        //find(Pre *head,Data *data,int i,stat *result,int max,int size,int data_size,unsigned int min_sup)
+        //find(head,data,i+1,result,max,size,data_size,min_sup);
+        
+        head.val[data[i].now/32] &= ~(1U << (data[i].now%32));
     }   
 
+    
     __syncthreads();
     
     //printf("finish\n");
@@ -196,11 +215,11 @@ class ECLAT{
         }
         void init(vector< pair< int,vector<int> > > &input_data)
         {
-            this->ori_data = (Data*)malloc(input_data.size() * sizeof(Data));
+            this->ori_data = new Data[input_data.size()];
 
             //here we first filter out the un sup data
             this->count = 0;
-            
+            printf("this->max::%d\n",this->max);
             for(int i=0;i<input_data.size();i++)
             {
                 //printf("input_data[%d].second.size() %d\n",i,input_data[i].second.size());
@@ -208,12 +227,12 @@ class ECLAT{
                 {
                     //printf("qq ");
                     this->ori_data[this->count].now = i;
-                    this->ori_data[this->count].bit = (unsigned int*)malloc(this->max*sizeof(int));
+                    this->ori_data[this->count].bit = new unsigned int[this->max];
                     
                     //printf("(%d,%d) ",this->ori_data[this->count].now,input_data[i].second.size());       
                     fprintf(this->output,"%d ",this->ori_data[this->count].now+1);
 
-                    memset(this->ori_data[this->count].bit,0,this->max*sizeof(int));
+                    memset(this->ori_data[this->count].bit,0,this->max*sizeof(unsigned int));
                     for(int j=0;j<input_data[i].second.size();j++)
                         this->ori_data[this->count].bit[ input_data[i].second[j] / 32 ] |=  1U << (input_data[i].second[j]%32) ; 
 
@@ -223,80 +242,81 @@ class ECLAT{
                     this->count ++;
                 }
             }
-            printf("this->count %d\n",this->count);
             /*
+            printf("this->count %d\n",this->count);
             unsigned int temp;
-            for(int i=0;i<this->count;i++)
+            for(int i=0;i<1;i++)
             {
-                printf("%d:",this->ori_data[i].now);
-                for(int j=0;j<this->max*32;j++)
-                {
-                    if(this->ori_data[i].bit[j/32] & (1U<<(j%32)))
-                        printf("1");
-                    else
-                        printf("0");
-                    if(j%32==0&&j)
-                        printf(" ");
-                }    
+                printf("%d:\n",i);
+                for(int j=0;j<this->max;j++)
+                    printf("%u ",this->ori_data[i].bit[j]);
                 printf("\n");
             }
             */
-                    
         }
         void freq()
         {
             int i,j;
+            unsigned int *temp = new unsigned int[this->max];
+            memset(temp, 0, this->max * sizeof(unsigned int));
             Data* d_data;
-            Data* h_data = (Data*)malloc(this->count * sizeof(Data));
+            Data* h_data = new Data[this->count];
             
             stat* d_result;
-            stat* h_result = (stat*)malloc(N * sizeof(stat));
+            stat* h_result = new stat[N];
 
             memcpy(h_data, this->ori_data, this->count * sizeof(Data));
             memset(h_result, 0, N * sizeof(stat));
 
             //printf("state 1\n");
 
+            cudaMalloc((void**)&d_data, this->count*sizeof(Data)); 
+            cudaMemcpy(d_data, this->ori_data, this->count*sizeof(Data), cudaMemcpyHostToDevice);
+            
             for (i=0; i<this->count ; i++){
-                cudaMalloc(&(h_data[i].bit), this->max*sizeof(int));
-                cudaMemcpy(h_data[i].bit, this->ori_data[i].bit,  this->max*sizeof(int), cudaMemcpyHostToDevice);
+                cudaMalloc((void**)&(h_data[i].bit), this->max*sizeof(unsigned int));
+                cudaMemcpy(h_data[i].bit, this->ori_data[i].bit,  this->max*sizeof(unsigned int), cudaMemcpyHostToDevice);
+                cudaMemcpy(&(d_data[i].bit), &(h_data[i].bit),  sizeof(unsigned int*), cudaMemcpyHostToDevice);
             }// matrix data is now on the gpu, now copy the "meta" data to gpu
+            
 
+            cudaMalloc((void**)&d_result, N*sizeof(stat)); 
             for (i=0; i<N ; i++){
-                cudaMalloc(&(h_result[i].val), this->size*sizeof(int));
-                cudaMemset(h_result[i].val, 0,  this->size*sizeof(int) );
+                cudaMalloc((void**)&(h_result[i].val), this->size*sizeof(unsigned int));
+                cudaMemset(h_result[i].val, 0,  this->size*sizeof(unsigned int) );
+                cudaMemcpy(&(d_result[i].val), &(h_result[i].val),  sizeof(unsigned int*), cudaMemcpyHostToDevice);
                 
-                cudaMalloc(&(h_result[i].count), sizeof(int));
-                cudaMemset(h_result[i].count, 0,  sizeof(int));
+                cudaMalloc((void**)&(h_result[i].count), sizeof(unsigned int));
+                cudaMemset(h_result[i].count, 0,  sizeof(unsigned int));
+                cudaMemcpy(&(d_result[i].count), &(h_result[i].count),  sizeof(unsigned int*), cudaMemcpyHostToDevice);
             }// matrix data is now on the gpu, now copy the "meta" data to gpu
 
-            cudaMalloc(&d_data, this->count*sizeof(Data)); 
-            cudaMemcpy(d_data, h_data, this->count*sizeof(Data), cudaMemcpyHostToDevice);
-            cudaMalloc(&d_result, N*sizeof(stat)); 
-            cudaMemcpy(d_result, h_result, N*sizeof(stat), cudaMemcpyHostToDevice);
+            
 
             int *d_count;
-            int *h_count = (int*)malloc(block_size*sizeof(int));
-            cudaMalloc(&d_count, block_size*sizeof(int)); 
+            int *h_count = new int[block_size];
+            cudaMalloc((void**)&d_count, block_size*sizeof(int)); 
             cudaMemset(d_count,0, block_size*sizeof(int));
 
             printf("this->count:%d\n",this->count);
             //gpu_find(Data *data,stat *result,int max,int size,int data_size,unsigned int min_sup,int *count)
-            gpu_find<<<block_size,thread_size,0>>>(d_data,d_result,this->max,this->size,this->count,this->min_sup,d_count);
-            while(1);
-
-            cudaMemcpy(h_count,d_count, block_size*sizeof(int), cudaMemcpyDeviceToHost);
+            gpu_find<<<block_size,thread_size>>>(d_data,d_result,this->max,this->size,this->count,this->min_sup,d_count);
+            fflush(stdout);
+            cudaDeviceSynchronize();
+            cudaCheckErrors("???????????????");
             
-            stat *ans = (stat*)malloc(N*sizeof(stat));
+            cudaMemcpy(h_count,d_count, block_size*sizeof(unsigned int), cudaMemcpyDeviceToHost);
+            
+            stat *ans = new stat[N];
             cudaMemcpy(h_result , d_result, N*sizeof(stat), cudaMemcpyDeviceToHost);
 
             for(i=0;i<N;i++)
             {
-                ans[i].val = (unsigned int*)malloc(sizeof(int)*this->size);
-                ans[i].count = (unsigned int*)malloc(sizeof(int));
+                ans[i].val = new unsigned int[this->size];
+                ans[i].count = new unsigned int[1];
 
-                cudaMemcpy(ans[i].val , h_result[i].val, this->size*sizeof(int), cudaMemcpyDeviceToHost);
-                cudaMemcpy(ans[i].count , h_result[i].count, sizeof(int), cudaMemcpyDeviceToHost);    
+                cudaMemcpy(ans[i].val , h_result[i].val, this->size*sizeof(unsigned int), cudaMemcpyDeviceToHost);
+                cudaMemcpy(ans[i].count , h_result[i].count, sizeof(unsigned int), cudaMemcpyDeviceToHost);    
 
                 //printf("bit %d %d %d\n",i,ans[i].bit[0],ans[i].count[0]);
             }

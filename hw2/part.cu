@@ -47,7 +47,7 @@ class ECLAT{
     public:
         vector< pair<int, unsigned int*> > input_data;
         int min_sup;
-        char * output_file;
+        FILE* output;
         vector< pair<vector<int>,int> > ans;
 
         int max,size;
@@ -56,16 +56,31 @@ class ECLAT{
         }
         ECLAT(vector< pair< int , vector<int> > > &input_data,int max,double min_sup,char* output_file){
             this->min_sup = int(ceil(min_sup));
-            this->output_file = output_file;
+            
+            this->output = fopen(output_file,"w");
+            
             this->ans.clear();
             
             this->max = (max+31)/32;
 
             this->init(input_data);
         }
+        void print(unsigned *x)
+        {
+            for(int j=0;j<this->max*32;j++)
+            {
+                if(x[j/32] & 1UL<<(j%32)) printf("1");
+                else printf("0");
+                
+                if(j && j%32==0) printf(" ");
+            }
+            printf("\n");
+            fflush(stdout);
+        }
         void init(vector< pair< int , vector<int> > > &input_data)
         {
             //here we first filter out the un sup data
+            unsigned int qq;
             for(int i=0;i<input_data.size();i++)
                 if(input_data[i].second.size()>=this->min_sup)
                 {
@@ -73,9 +88,13 @@ class ECLAT{
                     
                     memset(temp,0,this->max*sizeof(int));
 
+                    //printf("(%d %d)\n",input_data[i].first,input_data[i].second.size());
                     for(int j=0;j<input_data[i].second.size();j++)
                         temp[input_data[i].second[j]/32] |= (1UL << (input_data[i].second[j]%32));
                     
+                    //printf("%3d:",input_data[i].first);
+                    //print(temp);
+
                     this->input_data.push_back( make_pair(input_data[i].first,temp) );
                 }
             printf("max:%d this->input_data:%d",this->max,this->input_data.size());
@@ -88,6 +107,10 @@ class ECLAT{
             unsigned int *d_result;
             int *d_count;
 
+            //print(x);
+            //print(y);
+            
+
             //move to gpu
             cudaMalloc((void**)&d_vec_x, this->max*sizeof(unsigned int)); 
             cudaMemcpy(d_vec_x, x, this->max*sizeof(unsigned int), cudaMemcpyHostToDevice);
@@ -99,10 +122,10 @@ class ECLAT{
             cudaMemset(d_result, 0, this->max*sizeof(unsigned int));
 
             cudaMalloc((void**)&d_count,block_size* sizeof(int)); 
-            cudaMemset(d_result, 0, block_size*sizeof(int));
+            cudaMemset(d_count, 0, block_size*sizeof(int));
 
 
-            gpu_inter<<<block_size,thread_size>>>(d_vec_x,d_vec_y,d_result,d_count,this->max);
+            gpu_inter<<<block_size,thread_size,0>>>(d_vec_x,d_vec_y,d_result,d_count,this->max);
             
             //move to cpu
             unsigned int *h_result = new unsigned int[this->max];
@@ -115,7 +138,9 @@ class ECLAT{
             int count = 0;
             for(int i=0;i<block_size;i++)
                 count += h_count[i];
+                    
 
+            //count = count/0;
             cudaFree(d_result);
             cudaFree(d_vec_x);
             cudaFree(d_vec_y);
@@ -126,46 +151,36 @@ class ECLAT{
             return pair<int, unsigned int*>(count,h_result);
         }
 
-        void find(vector<int> arr, unsigned int* bit,int now)
+        void find(vector<int> &arr,int idx, unsigned int* bit,int now)
         {
             pair<int, unsigned int*> result;
             
-            int idx = arr.size();
-            arr.push_back(0);
+            while(arr.size()<=idx)
+                arr.push_back(0);
 
-            for(int i = now;i<this->input_data.size();i++)
+            for(;now<this->input_data.size();now++)
             {
                 //this result pass the min sup
                 //add to the final ans
 
-                result = use_gpu( bit , this->input_data[i].second);
+                result = use_gpu( bit , this->input_data[now].second);
                 if( result.first >= this->min_sup)
                 {
-                    arr[idx] = this->input_data[i].first;
+                    //printf("(%d %d %d)\n",idx,i,result.first);
+                    arr[idx] = this->input_data[now].first;
                     
-                    this->ans.push_back(pair< vector<int>,int>(arr,result.first));
+                    //this->ans.push_back(pair< vector<int>,int>(arr,result.first));
                     
-                    this->find(arr,result.second,i+1);
+                    for(int i=0 ; i<idx+1 ; i++)
+                        fprintf(output,"%d ",arr[i]+1);
+                    fprintf(output,"(%d)\n",result.first);
+                    
+                    this->find(arr,idx+1,result.second,now+1);
                 }
                 delete(result.second);
             }
         }
 
-        void freq(vector<int> arr, unsigned int* bit)
-        {
-            this->find(arr,bit,0);
-
-            FILE* output = fopen(this->output_file,"w");
-            //here we finish find the ans 
-            //next we need to do the sort for the ans
-            for(int i=0 ; i<this->ans.size() ; i++)
-            {
-                sort(this->ans[i].first.begin(),this->ans[i].first.end());
-                for(int j=0;j<this->ans[i].first.size();j++)
-                    fprintf(output,"%d ",this->ans[i].first[j]+1);
-                fprintf(output,"(%d)\n",this->ans[i].second);
-            }
-        }
 };
 
 int main(int argc,char * argv[])
@@ -213,11 +228,13 @@ int main(int argc,char * argv[])
     head.first.clear();
     head.second = new unsigned int[eclat.max];
 
-    memset(head.second,1,eclat.max*sizeof(unsigned int));
+    printf("eclat.max %d\n",eclat.max);
+    for(int i=0;i<eclat.max;i++)
+        head.second[i] = 0xFFFFFFFF;
     //cout << head.second;
 
     printf("find freq\n");
-    eclat.freq(head.first,head.second);
+    eclat.find(head.first,0,head.second,0);
     delete(head.second);
 
     end = clock();
