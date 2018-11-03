@@ -78,6 +78,7 @@ class ECLAT{
                     
                     this->input_data.push_back( make_pair(input_data[i].first,temp) );
                 }
+            printf("max:%d this->input_data:%d",this->max,this->input_data.size());
         }
         pair<int, unsigned int*> use_gpu( unsigned int *x , unsigned int *y)
         {
