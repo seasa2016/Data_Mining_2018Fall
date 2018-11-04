@@ -7,7 +7,7 @@
 #include <time.h>
 #include<math.h>
 
-#define block_size 16
+#define block_size 256
 #define thread_size 256
 using namespace std;
 
@@ -159,7 +159,7 @@ class ECLAT{
 			//printf("finish count\n");
             //move result and count back to the cpu
             cudaMemcpy(this->h_result,this->d_result, this->size*sizeof(unsigned int*), cudaMemcpyDeviceToHost);
-            for (int i=0; i<this->size; i++)
+            for (int i=now; i<this->size; i++)
                 cudaMemcpy(result[i],this->h_result[i],  this->max*sizeof(unsigned int), cudaMemcpyDeviceToHost);
 
             cudaMemcpy(h_count,this->d_count, this->size*sizeof(int), cudaMemcpyDeviceToHost);
