@@ -23,20 +23,22 @@ __global__ void gpu_inter(unsigned int * query,unsigned int** bank,unsigned int*
     const int tid = threadIdx.x;
     const int bid = blockIdx.x;
     int i,j;
+	
     //move the query on the the sharded memory
 
     //use parella to compute all the result
-    for(i=bid*blockDim.x+tid + start ; i<size ; i+= blockDim.x * gridDim.x)
-    {
-        d_count[i] = 0;
-        
-        for(j=0;j<max;j++)
-        {
-            d_result[i][j] = query[j] & bank[i][j];
-
-            d_count[i] += bit_count(d_result[i][j]);
-        }
-    }
+    for(i=bid + start ; i<size ; i+= gridDim.x) 
+        for(j=tid ; j<max ; j+=blockDim.x)
+        	d_result[i][j] = query[j] & bank[i][j];
+    
+    
+	
+    for(i=bid + gridDim.x*tid + start ; i<size ; i+= gridDim.x*blockDim.x)
+    {	
+		d_count[i] = 0;
+		for(j=0;j<max;j++)
+			d_count[i] += bit_count(d_result[i][j]);
+	}
 }   
 
 
