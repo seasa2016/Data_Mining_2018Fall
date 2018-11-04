@@ -8,7 +8,7 @@
 #include<math.h>
 
 #define block_size 16
-#define thread_size 16
+#define thread_size 256
 using namespace std;
 
 
