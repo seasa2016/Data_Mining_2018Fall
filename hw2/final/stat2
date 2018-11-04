@@ -1,0 +1,49 @@
+256_256_0.001
+parsing data
+initial
+finish 2d
+finish 1d
+max:16890 this->size:652
+eclat.max 16890
+find freq
+finishTime = 60.758345
+
+256_256_0.0008
+parsing data
+initial
+finish 2d
+finish 1d
+max:16890 this->size:741
+eclat.max 16890
+find freq
+finishTime = 99.573576
+
+256_256_0.0006
+parsing data
+initial
+finish 2d
+finish 1d
+max:16890 this->size:853
+eclat.max 16890
+find freq
+finishTime = 149.364495
+
+256_256_0.0004
+parsing data
+initial
+finish 2d
+finish 1d
+max:16890 this->size:1050
+eclat.max 16890
+find freq
+finishTime = 223.673421
+
+256_256_0.0002
+parsing data
+initial
+finish 2d
+finish 1d
+max:16890 this->size:1369
+eclat.max 16890
+find freq
+finishTime = 491.660509

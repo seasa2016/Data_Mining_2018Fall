@@ -32,7 +32,8 @@ __global__ void gpu_inter(unsigned int * query,unsigned int** bank,unsigned int*
         	d_result[i][j] = query[j] & bank[i][j];
     
     
-	
+	__syncthreads();
+
     for(i=bid + gridDim.x*tid + start ; i<size ; i+= gridDim.x*blockDim.x)
     {	
 		d_count[i] = 0;
