@@ -18,37 +18,51 @@ __device__ int bit_count(unsigned int i)
     i = (i & 0x33333333) + ((i >> 2) & 0x33333333);
     return (((i + (i >> 4)) & 0x0F0F0F0F) * 0x01010101) >> 24;
 }
-__global__ void gpu_inter(unsigned int * d_vec_x,unsigned int * d_vec_y,unsigned int * d_result,int *d_count,int max)
+__global__ void gpu_inter(unsigned int * query,unsigned int** bank,unsigned int** d_result,int *d_count,int start,int max,int size)
 {
     const int tid = threadIdx.x;
     const int bid = blockIdx.x;
-    __shared__ int sum[thread_size];
-    int i;
-
-    sum[tid] = 0;
-    for(i=bid*blockDim.x+tid ; i<max ; i+= blockDim.x * gridDim.x)
-    {
-        d_result[i] = d_vec_x[i] & d_vec_y[i];
-        sum[tid] += bit_count(d_result[i]);
-    }
-
+    extern __shared__ unsigned int q[];
+    int i,j;
+    //move the query on the the sharded memory
+    if(tid==0)
+        for(i=0;i<max;i++)
+            q[i] = query[i];
     __syncthreads();
-    
-    if(tid == 0)
+
+    //use parella to compute all the result
+    for(i=bid*blockDim.x+tid + start ; i<size ; i+= blockDim.x * gridDim.x)
     {
-        d_count[bid] = 0;
-        for(i=0;i<blockDim.x;i++)
-            d_count[bid] += sum[i];
-    }    
+        d_count[i] = 0;
+        
+        for(j=0;j<max;j++)
+        {
+            d_result[i][j] = q[j] & bank[i][j];
+
+            d_count[i] += bit_count(d_result[i][j]);
+        }
+    }
 }   
 
 
 class ECLAT{
     public:
-        vector< pair<int, unsigned int*> > input_data;
         int min_sup;
         FILE* output;
-        vector< pair<vector<int>,int> > ans;
+        unsigned int **d_data;
+        unsigned int **h_data;
+
+        unsigned int **data;
+
+        unsigned int **h_result;
+        unsigned int **d_result;
+
+        unsigned int *d_query;
+
+        int *h_count;
+        int *d_count;
+
+        int *pre;
 
         int max,size;
         ECLAT(void){
@@ -58,8 +72,6 @@ class ECLAT{
             this->min_sup = int(ceil(min_sup));
             
             this->output = fopen(output_file,"w");
-            
-            this->ans.clear();
             
             this->max = (max+31)/32;
 
@@ -80,7 +92,10 @@ class ECLAT{
         void init(vector< pair< int , vector<int> > > &input_data)
         {
             //here we first filter out the un sup data
-            unsigned int qq;
+            
+            vector< pair<int,unsigned int*> > data_temp;
+            
+            //finst parsing the data
             for(int i=0;i<input_data.size();i++)
                 if(input_data[i].second.size()>=this->min_sup)
                 {
@@ -88,99 +103,112 @@ class ECLAT{
                     
                     memset(temp,0,this->max*sizeof(int));
 
-                    //printf("(%d %d)\n",input_data[i].first,input_data[i].second.size());
                     for(int j=0;j<input_data[i].second.size();j++)
                         temp[input_data[i].second[j]/32] |= (1UL << (input_data[i].second[j]%32));
                     
-                    //printf("%3d:",input_data[i].first);
-                    //print(temp);
-
-                    this->input_data.push_back( make_pair(input_data[i].first,temp) );
+                    data_temp.push_back( make_pair(input_data[i].first,temp) );
                 }
-            printf("max:%d this->input_data:%d",this->max,this->input_data.size());
+            //put the data into cpu memory
+            this->size = data_temp.size();
+
+            this->pre = new int[data_temp.size()];
+            this->data = new unsigned int*[data_temp.size()];
+
+            for(int i=0 ; i<data_temp.size() ; i++)
+            {
+                this->pre[i] = data_temp[i].first;
+                this->data[i] = data_temp[i].second;
+            }
+
+            //we should alloc all the memory first XD    
+            this->h_data  = new unsigned int*[data_temp.size()];
+            this->h_result  = new unsigned int*[data_temp.size()];
+
+            //alloc memory to 2d array
+            cudaMalloc(&(this->d_data), data_temp.size()*sizeof(unsigned int*)); 
+            cudaMalloc(&(this->d_result), data_temp.size()*sizeof(unsigned int*)); 
+
+            cudaMemcpy(this->d_data, this->data,  data_temp.size()*sizeof(unsigned int*), cudaMemcpyHostToDevice);
+                
+            for(int i=0; i<data_temp.size(); i++){
+                //alloc memory to 1d array
+                cudaMalloc(&(this->h_data[i]), (this->max)*sizeof(unsigned int));
+                cudaMalloc(&(this->h_result[i]), (this->max)*sizeof(unsigned int));
+
+                cudaMemcpy(this->h_data[i], this->data[i],  (this->max)*sizeof(unsigned int) , cudaMemcpyHostToDevice);
+                
+                cudaMemcpy(&(this->d_data[i]), &(this->h_data[i]), sizeof(unsigned int*), cudaMemcpyHostToDevice);
+                cudaMemcpy(&(this->d_result[i]), &(this->h_result[i]), sizeof(unsigned int*), cudaMemcpyHostToDevice);
+            }
+
+            cudaMalloc((void**)&(this->d_query), this->max*sizeof(unsigned int));
+            cudaMalloc((void**)&(this->d_count), this->size* sizeof(int));  
+
+            printf("max:%d this->size:%d",this->max,this->size);
         }
-        pair<int, unsigned int*> use_gpu( unsigned int *x , unsigned int *y)
+        // use_gpu( bit , now, result, h_count);
+        void use_gpu( unsigned int *query,int now,unsigned int**result,int* h_count)
         {
-            unsigned int *d_vec_x;
-            unsigned int *d_vec_y;
+            //we only copy the data here
+            cudaMemcpy(this->d_query, query, this->max*sizeof(unsigned int), cudaMemcpyHostToDevice);
 
-            unsigned int *d_result;
-            int *d_count;
-
-            //print(x);
-            //print(y);
+            // gpu_inter(unsigned int * query,unsigned int** bank,unsigned int** d_result,int *d_count,int start,int max,int size)
+            gpu_inter<<<block_size,thread_size,0>>>(this->d_query,this->d_data,this->d_result,this->d_count,now,this->max,this->size);
             
+            //move result and count back to the cpu
+            cudaMemcpy(this->h_result,this->d_result, this->size*sizeof(unsigned int*), cudaMemcpyDeviceToHost);
+            for (int i=0; i<this->size; i++)
+                cudaMemcpy(result[i],this->h_result[i],  this->size*sizeof(unsigned int), cudaMemcpyDeviceToHost);
 
-            //move to gpu
-            cudaMalloc((void**)&d_vec_x, this->max*sizeof(unsigned int)); 
-            cudaMemcpy(d_vec_x, x, this->max*sizeof(unsigned int), cudaMemcpyHostToDevice);
-
-            cudaMalloc((void**)&d_vec_y, this->max*sizeof(unsigned int)); 
-            cudaMemcpy(d_vec_y, y, this->max*sizeof(unsigned int), cudaMemcpyHostToDevice);
-            
-            cudaMalloc((void**)&d_result, this->max*sizeof(unsigned int)); 
-            cudaMemset(d_result, 0, this->max*sizeof(unsigned int));
-
-            cudaMalloc((void**)&d_count,block_size* sizeof(int)); 
-            cudaMemset(d_count, 0, block_size*sizeof(int));
-
-
-            gpu_inter<<<block_size,thread_size,0>>>(d_vec_x,d_vec_y,d_result,d_count,this->max);
-            
-            //move to cpu
-            unsigned int *h_result = new unsigned int[this->max];
-            int *h_count = new int[block_size];
-
-
-            cudaMemcpy(h_result,d_result, this->max*sizeof(unsigned int), cudaMemcpyDeviceToHost);
-            cudaMemcpy(h_count,d_count, block_size*sizeof(int), cudaMemcpyDeviceToHost);
-
-            int count = 0;
-            for(int i=0;i<block_size;i++)
-                count += h_count[i];
-                    
-
-            //count = count/0;
-            cudaFree(d_result);
-            cudaFree(d_vec_x);
-            cudaFree(d_vec_y);
-            cudaFree(d_count);
-
-            delete(h_count);
-
-            return pair<int, unsigned int*>(count,h_result);
+            cudaMemcpy(h_count,this->d_count, this->size*sizeof(int), cudaMemcpyDeviceToHost);
         }
 
         void find(vector<int> &arr,int idx, unsigned int* bit,int now)
         {
-            pair<int, unsigned int*> result;
-            
+            unsigned int** result;
+            int* h_count;
+            int i;
+
             while(arr.size()<=idx)
                 arr.push_back(0);
 
-            for(;now<this->input_data.size();now++)
+            h_count = new int[this->size];
+            result = new unsigned int*[this->size];
+            for(i=0;i<this->size;i++)
+                result[i] = new unsigned int[this->size];
+
+            use_gpu( bit , now, result, h_count);
+            
+            for(;now<this->size;now++)
             {
-                //this result pass the min sup
-                //add to the final ans
-
-                result = use_gpu( bit , this->input_data[now].second);
-                if( result.first >= this->min_sup)
+                //since we share the memory    
+                if( h_count[now] >= this->min_sup)
                 {
-                    //printf("(%d %d %d)\n",idx,i,result.first);
-                    arr[idx] = this->input_data[now].first;
-                    
-                    //this->ans.push_back(pair< vector<int>,int>(arr,result.first));
-                    
-                    for(int i=0 ; i<idx+1 ; i++)
-                        fprintf(output,"%d ",arr[i]+1);
-                    fprintf(output,"(%d)\n",result.first);
-                    
-                    this->find(arr,idx+1,result.second,now+1);
-                }
-                delete(result.second);
-            }
-        }
+                    arr[idx] = this->pre[now];
+                    for(i=0 ; i<idx+1 ; i++)
+                        fprintf(this->output,"%d ",arr[i]+1);
+                    fprintf(this->output,"(%d)\n",h_count[now]);
 
+                    find(arr,idx+1,result[now],now+1);
+                }
+                delete(result[i]);
+            }
+            delete(result);
+            delete(h_count);
+        }
+        void finish()
+        {
+            cudaFree(this->d_query);
+            cudaFree(this->d_count);  
+
+            for(int i=0; i<this->size; i++){
+                cudaFree(this->h_data[i]);
+                cudaFree(this->h_result[i]);
+            }
+
+            cudaFree(this->d_data); 
+            cudaFree(this->d_result); 
+        }
 };
 
 int main(int argc,char * argv[])
@@ -235,6 +263,8 @@ int main(int argc,char * argv[])
 
     printf("find freq\n");
     eclat.find(head.first,0,head.second,0);
+
+    eclat.finish();
     delete(head.second);
 
     end = clock();
