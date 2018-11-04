@@ -62,6 +62,9 @@ class ECLAT{
         int *pre;
 
         int max,size;
+		vector<unsigned int**> result;
+		vector<int*> count;
+
         ECLAT(void){
             
         }
@@ -167,20 +170,26 @@ class ECLAT{
 
         void find(vector<int> &arr,int idx, unsigned int* bit,int now)
         {
-            unsigned int** result;
-            int* h_count;
             int i;
+            int* count_temp;
+            unsigned int** result_temp;
 
 			//printf("idx:%d now %d\n",idx,now);
             while(arr.size()<=idx)
-                arr.push_back(0);
+			{
+				arr.push_back(0);
 
-            h_count = new int[this->size];
-            result = new unsigned int*[this->size];
-            for(i=0;i<this->size;i++)
-                result[i] = new unsigned int[this->max];
+            	count_temp = new int[this->size];
+            	result_temp = new unsigned int*[this->size];
+            	for(i=0;i<this->size;i++)
+                	result_temp[i] = new unsigned int[this->max];
+				
+				this->result.push_back(result_temp);
+				this->count.push_back(count_temp);
+			}
+
 			//printf("use gpu\n");
-            use_gpu( bit , now, result, h_count);
+            use_gpu( bit , now, this->result[idx], this->count[idx]);
            
 			/*
 			printf("query:  ");
@@ -195,35 +204,42 @@ class ECLAT{
             {
 				//printf("in\n");
                 //since we share the memory    
-                if( h_count[now] >= this->min_sup)
+                if( this->count[idx][now] >= this->min_sup)
                 {
                     arr[idx] = this->pre[now];
                     for(i=0 ; i<idx+1 ; i++)
                         fprintf(this->output,"%d ",arr[i]+1);
-                    fprintf(this->output,"(%d)\n",h_count[now]);
+                    fprintf(this->output,"(%d)\n",this->count[idx][now]);
 
-                    find(arr,idx+1,result[now],now+1);
+                    find(arr,idx+1,this->result[idx][now],now+1);
                 }
 				//printf("out\n");
             }
 			
-			for(i=0;i<this->size;i++)
-                delete(result[i]);
-            delete(result);
-            delete(h_count);
         }
         void finish()
         {
             cudaFree(this->d_query);
             cudaFree(this->d_count);  
 
-            for(int i=0; i<this->size; i++){
+			int i,j;
+            for(i=0; i<this->size; i++){
                 cudaFree(this->h_data[i]);
                 cudaFree(this->h_result[i]);
             }
 
             cudaFree(this->d_data); 
-            cudaFree(this->d_result); 
+            cudaFree(this->d_result);
+
+			
+			for(i=0;i<this->result.size();i++)
+			{
+				for(j=0;j<this->size;i++)
+					delete(this->result[i][j]);
+
+				delete(this->result[i]);
+				delete(this->count[i]);
+			}
         }
 };
 
