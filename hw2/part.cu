@@ -234,7 +234,7 @@ class ECLAT{
 			
 			for(i=0;i<this->result.size();i++)
 			{
-				for(j=0;j<this->size;i++)
+				for(j=0;j<this->size;j++)
 					delete(this->result[i][j]);
 
 				delete(this->result[i]);
@@ -295,7 +295,7 @@ int main(int argc,char * argv[])
 
     printf("find freq\n");
     eclat.find(head.first,0,head.second,0);
-
+	printf("finish");
     eclat.finish();
     delete(head.second);
 
