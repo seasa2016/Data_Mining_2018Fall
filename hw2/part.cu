@@ -22,13 +22,8 @@ __global__ void gpu_inter(unsigned int * query,unsigned int** bank,unsigned int*
 {
     const int tid = threadIdx.x;
     const int bid = blockIdx.x;
-    extern __shared__ unsigned int q[];
     int i,j;
     //move the query on the the sharded memory
-    if(tid==0)
-        for(i=0;i<max;i++)
-            q[i] = query[i];
-    __syncthreads();
 
     //use parella to compute all the result
     for(i=bid*blockDim.x+tid + start ; i<size ; i+= blockDim.x * gridDim.x)
@@ -37,7 +32,7 @@ __global__ void gpu_inter(unsigned int * query,unsigned int** bank,unsigned int*
         
         for(j=0;j<max;j++)
         {
-            d_result[i][j] = q[j] & bank[i][j];
+            d_result[i][j] = query[j] & bank[i][j];
 
             d_count[i] += bit_count(d_result[i][j]);
         }
@@ -118,6 +113,8 @@ class ECLAT{
             {
                 this->pre[i] = data_temp[i].first;
                 this->data[i] = data_temp[i].second;
+				//printf("%3d:",this->pre[i]);
+				//print(this->data[i]);
             }
 
             //we should alloc all the memory first XD    
@@ -129,7 +126,7 @@ class ECLAT{
             cudaMalloc(&(this->d_result), data_temp.size()*sizeof(unsigned int*)); 
 
             cudaMemcpy(this->d_data, this->data,  data_temp.size()*sizeof(unsigned int*), cudaMemcpyHostToDevice);
-                
+            printf("finish 2d\n"); 
             for(int i=0; i<data_temp.size(); i++){
                 //alloc memory to 1d array
                 cudaMalloc(&(this->h_data[i]), (this->max)*sizeof(unsigned int));
@@ -140,11 +137,12 @@ class ECLAT{
                 cudaMemcpy(&(this->d_data[i]), &(this->h_data[i]), sizeof(unsigned int*), cudaMemcpyHostToDevice);
                 cudaMemcpy(&(this->d_result[i]), &(this->h_result[i]), sizeof(unsigned int*), cudaMemcpyHostToDevice);
             }
+            printf("finish 1d\n"); 
 
             cudaMalloc((void**)&(this->d_query), this->max*sizeof(unsigned int));
             cudaMalloc((void**)&(this->d_count), this->size* sizeof(int));  
-
-            printf("max:%d this->size:%d",this->max,this->size);
+			
+            printf("max:%d this->size:%d\n",this->max,this->size);
         }
         // use_gpu( bit , now, result, h_count);
         void use_gpu( unsigned int *query,int now,unsigned int**result,int* h_count)
@@ -152,13 +150,15 @@ class ECLAT{
             //we only copy the data here
             cudaMemcpy(this->d_query, query, this->max*sizeof(unsigned int), cudaMemcpyHostToDevice);
 
-            // gpu_inter(unsigned int * query,unsigned int** bank,unsigned int** d_result,int *d_count,int start,int max,int size)
+			//printf("start count\n");
             gpu_inter<<<block_size,thread_size,0>>>(this->d_query,this->d_data,this->d_result,this->d_count,now,this->max,this->size);
             
+			cudaDeviceSynchronize();
+			//printf("finish count\n");
             //move result and count back to the cpu
             cudaMemcpy(this->h_result,this->d_result, this->size*sizeof(unsigned int*), cudaMemcpyDeviceToHost);
             for (int i=0; i<this->size; i++)
-                cudaMemcpy(result[i],this->h_result[i],  this->size*sizeof(unsigned int), cudaMemcpyDeviceToHost);
+                cudaMemcpy(result[i],this->h_result[i],  this->max*sizeof(unsigned int), cudaMemcpyDeviceToHost);
 
             cudaMemcpy(h_count,this->d_count, this->size*sizeof(int), cudaMemcpyDeviceToHost);
         }
@@ -169,18 +169,29 @@ class ECLAT{
             int* h_count;
             int i;
 
+			//printf("idx:%d now %d\n",idx,now);
             while(arr.size()<=idx)
                 arr.push_back(0);
 
             h_count = new int[this->size];
             result = new unsigned int*[this->size];
             for(i=0;i<this->size;i++)
-                result[i] = new unsigned int[this->size];
-
+                result[i] = new unsigned int[this->max];
+			//printf("use gpu\n");
             use_gpu( bit , now, result, h_count);
-            
+           
+			/*
+			printf("query:  ");
+			print(bit);
+			for(i=0;i<this->size;i++)
+            {
+				printf("%3d %3d:",h_count[i],this->pre[i]);
+				print(result[i]);
+			}
+			*/
             for(;now<this->size;now++)
             {
+				//printf("in\n");
                 //since we share the memory    
                 if( h_count[now] >= this->min_sup)
                 {
@@ -191,8 +202,11 @@ class ECLAT{
 
                     find(arr,idx+1,result[now],now+1);
                 }
-                delete(result[i]);
+				//printf("out\n");
             }
+			
+			for(i=0;i<this->size;i++)
+                delete(result[i]);
             delete(result);
             delete(h_count);
         }
