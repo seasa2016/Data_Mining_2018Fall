@@ -65,7 +65,7 @@ bnb = BernoulliNB(class_prior=prior)
 y_pred = bnb.fit(X_train, y_train).predict(X_test)
 print("error rate dev BernoulliNB {0}".format(1-(y_test != y_pred).sum()/y_test.shape[0] ))
 
-from sklearn.tree import DecisionTreeClassifier,export_graphviz
+from sklearn.tree import DecisionTreeClassifier
 t = DecisionTreeClassifier(criterion='gini', max_depth=40, min_samples_split=2,
                                   min_samples_leaf =1, min_weight_fraction_leaf=0.0, max_features=None, 
                                   random_state=None, max_leaf_nodes=100,class_weight=None)
