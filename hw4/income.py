@@ -2,8 +2,9 @@ import sklearn
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
+import sys
 
-data = pd.read_csv('./income/income_train.csv',header=None)
+data = pd.read_csv(sys.argv[2],header=None)
 
 for idx in [1,3,5,6,7,8,9,13]:    
     m = data[idx].value_counts().index[0]
@@ -57,39 +58,41 @@ X_train, X_test, y_train, y_test = train_test_split(temp, training_label, test_s
 X_train_ori, X_test_ori, y_train, y_test = train_test_split(temp, training_label, test_size=0.2, random_state=42)
 X_train, X_test,mean,std = norm(X_train, X_test)
 
-prior = [24735/(24735+7827),7827/(24735+7827)]
+if(sys.argv[1] == 'N'):
+    prior = [24735/(24735+7827),7827/(24735+7827)]
+    from sklearn.naive_bayes import MultinomialNB
+    model = MultinomialNB(class_prior=prior)
+    y_pred = model.fit(X_train_ori, y_train).predict(X_test_ori)
+    print("error rate dev MultinomialNB {0}".format(1-(y_test != y_pred).sum()/y_test.shape[0] ))
 
-from sklearn.naive_bayes import GaussianNB
-gnb = GaussianNB(priors=prior)
-y_pred = gnb.fit(X_train, y_train).predict(X_test)
-print("error rate dev GaussianNB {0}".format(1-(y_test != y_pred).sum()/y_test.shape[0] ))
+    """
+    from sklearn.naive_bayes import GaussianNB
+    model = GaussianNB(priors=prior)
+    y_pred = model.fit(X_train, y_train).predict(X_test)
+    print("error rate dev GaussianNB {0}".format(1-(y_test != y_pred).sum()/y_test.shape[0] ))
 
-from sklearn.naive_bayes import MultinomialNB
-mnb = MultinomialNB(class_prior=prior)
-y_pred = mnb.fit(X_train_ori, y_train).predict(X_test_ori)
-print("error rate dev MultinomialNB {0}".format(1-(y_test != y_pred).sum()/y_test.shape[0] ))
+    from sklearn.naive_bayes import ComplementNB
+    model = ComplementNB(class_prior=prior)
+    y_pred = model.fit(X_train_ori, y_train).predict(X_test_ori)
+    print("error rate dev ComplementNB {0}".format(1-(y_test != y_pred).sum()/y_test.shape[0] ))
 
-from sklearn.naive_bayes import ComplementNB
-cnb = ComplementNB(class_prior=prior)
-y_pred = cnb.fit(X_train_ori, y_train).predict(X_test_ori)
-print("error rate dev ComplementNB {0}".format(1-(y_test != y_pred).sum()/y_test.shape[0] ))
+    from sklearn.naive_bayes import BernoulliNB
+    model = BernoulliNB(class_prior=prior)
+    y_pred = model.fit(X_train, y_train).predict(X_test)
+    print("error rate dev BernoulliNB {0}".format(1-(y_test != y_pred).sum()/y_test.shape[0] ))
+    """
+elif(sys.argv[1] == 'D'):
+    from sklearn import tree
+    model = tree.DecisionTreeClassifier(criterion='gini', max_depth=80, min_samples_split=10,
+                                    min_samples_leaf =6,min_weight_fraction_leaf=0.0, 
+                                    random_state=None, max_leaf_nodes=200,class_weight=None)
 
-from sklearn.naive_bayes import BernoulliNB
-bnb = BernoulliNB(class_prior=prior)
-y_pred = bnb.fit(X_train, y_train).predict(X_test)
-print("error rate dev BernoulliNB {0}".format(1-(y_test != y_pred).sum()/y_test.shape[0] ))
+    y_pred = model.fit(X_train, y_train).predict(X_train)
+    print("error rate dev DecisionTreeClassifier {0}".format(1-(y_train != y_pred).sum()/y_pred.shape[0] ))
+    y_pred = model.predict(X_test)
+    print("error rate DecisionTreeClassifier {0}".format(1-(y_test != y_pred).sum()/y_test.shape[0] ))
 
-from sklearn import tree
-t = tree.DecisionTreeClassifier(criterion='gini', max_depth=80, min_samples_split=10,
-                                  min_samples_leaf =6,min_weight_fraction_leaf=0.0, 
-                                  random_state=None, max_leaf_nodes=200,class_weight=None)
-
-y_pred = t.fit(X_train, y_train).predict(X_train)
-print("error rate dev DecisionTreeClassifier {0}".format(1-(y_train != y_pred).sum()/y_pred.shape[0] ))
-y_pred = t.predict(X_test)
-print("error rate DecisionTreeClassifier {0}".format(1-(y_test != y_pred).sum()/y_test.shape[0] ))
-
-data = pd.read_csv('./income/income_test.csv',header=None)
+data = pd.read_csv(sys.argv[3],header=None)
 testing_data = data[ (list(range(14)))].values
 
 temp = np.zeros((testing_data.shape[0],len(mapping)+6))
@@ -108,7 +111,7 @@ for j in range(testing_data.shape[1]):
 testing_data = temp.copy()
 testing_data = (testing_data-mean)/std
 
-y_pred = t.predict(testing_data)
+y_pred = model.predict(testing_data)
 
 with open('output','w') as f:
     for num in y_pred:
